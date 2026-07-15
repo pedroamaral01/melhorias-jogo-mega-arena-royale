@@ -1,0 +1,365 @@
+\documentclass[a4paper,12pt]{article}
+\usepackage[utf8]{inputenc}
+\usepackage[brazil]{babel}
+\usepackage[T1]{fontenc}
+\usepackage{lmodern}
+\usepackage{geometry}
+\usepackage{graphicx}
+\usepackage{indentfirst}
+\usepackage{float}
+\usepackage{amsmath}
+\usepackage{amsfonts}
+\usepackage{listings}
+\usepackage{array}
+\usepackage{hyperref}
+\usepackage{tikz}
+\usepackage{pgfplots}
+\pgfplotsset{compat=1.18}
+
+% Definição manual caso o comando abntex não exista nativamente na classe article
+\newcommand{\ABNTEXchapterfont}{\bfseries}
+
+\lstset{
+    basicstyle=\ttfamily\small,
+    breaklines=true,
+    frame=single,
+    literate={á}{{\'a}}1 {é}{{\'e}}1 {í}{{\'i}}1 {ó}{{\'o}}1 {ú}{{\'u}}1 {ã}{{\~a}}1 {õ}{{\~o}}1 {ç}{{\c{c}}}1 {°}{{$^\circ$}}1 {—}{---}1
+}
+
+\geometry{ a4paper, left=2cm, top=2cm, right=2cm, bottom=2cm }
+
+\begin{document}
+
+% --- CAPA ---
+\begin{titlepage}
+\begin{center}
+    \vspace*{1cm}
+    \rule{\textwidth}{0.4pt} \\
+    \textbf{UNIVERSIDADE FEDERAL DE OURO PRETO} \\
+    \textbf{INSTITUTO DE CIÊNCIAS EXATAS E APLICADAS} \\
+    \rule{\textwidth}{0.4pt}
+
+    \vspace{3cm}
+    \textbf{Pedro Henrique Amaral Estevão | 22.1.8079} \\
+    \textbf{Gustavo Tadeu Alves do Couto | 20.2.8124}
+
+    \vspace{4cm}
+    {\Large \textbf{Trabalho Prático 02: Melhorias de IA dos Bots do Jogo Mega Arena Royale}} \\
+    \vspace{0.5cm}
+    \textit{Implementação, Resultados Experimentais e Análise de Comportamento}
+
+    \vfill
+    \textbf{JOÃO MONLEVADE}\\
+    \textbf{\today}
+\end{center}
+\end{titlepage}
+
+\newpage
+
+% --- CONTEÚDO ---
+\clearpage
+\thispagestyle{plain}
+\begin{center}
+  {\ABNTEXchapterfont\LARGE\bfseries Melhorias de IA e Resultados das Validações}
+\end{center}
+
+\vspace{1cm}
+
+\section{Introdução}
+
+Este trabalho implementa as melhorias de inteligência artificial propostas no documento
+\textit{Proposta de Atualização do Jogo} sobre o jogo \textbf{Mega Arena Royale}, uma arena
+de tiro 2D \textit{top-down} escrita em HTML5/JavaScript (\textit{canvas}), com três modos de
+jogo: \textbf{SOLO (1v9)}, \textbf{DUPLAS} e \textbf{CHEFÃO (4v1)}.
+
+\textbf{A versão base do jogo é de autoria de Tiago Linhares Medeiros.} O trabalho aqui
+descrito não cria um jogo novo: altera exclusivamente o comportamento (IA) dos bots sobre a
+base existente, preservando mecânicas, interface e arquitetura originais.
+
+Na IA original, todos os bots escolhiam como alvo o inimigo mais próximo \textbf{do mapa
+inteiro} (bastava linha de visão), moviam-se em linha reta na direção do alvo (com
+\textit{strafe} em média distância) e patrulhavam pontos aleatórios. Não havia noção de raio
+de percepção, fuga, cura, cobertura, escolta ou priorização de itens --- comportamentos que
+constituem as melhorias deste trabalho.
+
+\section{Decisões de projeto e parametrização}
+
+A proposta define os comportamentos em termos de \textit{tiles} e do nível de dificuldade da
+partida. As seguintes convenções foram adotadas:
+
+\begin{itemize}
+  \item \textbf{Tile} $= 50$ px (passo da grade desenhada na arena de $1500 \times 1500$ px);
+  \item \textbf{Dificuldade} ($d$): 1--5 nos modos solo/duplas; no modo chefão é o nível do
+        chefe (1--10+). Para limiares percentuais de HP o fator é limitado a 5
+        ($\min(5, d)$) --- sem o limite, um chefão nível 10 teria limiar de fuga de 100\% do
+        HP e fugiria a partida inteira;
+  \item \textbf{Limiar de fuga para curar} $= (10 \times \min(5, d))\%$ do HP máximo;
+  \item \textbf{Visão do chefão} $= 2 \times d$ tiles $= 100 \times d$ px;
+  \item \textbf{Visão do bot 1v9} $= (4 + 2d)$ tiles $= 300$ a $700$ px;
+  \item \textbf{Recarga da esquiva (1v9)} $= \max(10,\; 35 - 5d)$ segundos
+        (30 s na dificuldade 1, conforme a proposta, diminuindo com a dificuldade);
+  \item \textbf{Esconder-se (1v9)}: abaixo de 30\% do HP (conforme a proposta);
+  \item \textbf{Fuga/busca de cura (1v9)}: abaixo de 40\% do HP (a proposta diz apenas
+        ``HP baixo''; 40\% fica acima do limiar de esconderijo, criando dois estágios).
+\end{itemize}
+
+\section{Metodologia de validação}
+
+Cada melhoria foi validada com um \textit{harness} em Node.js que: (i) extrai o
+\texttt{<script>} do HTML do jogo; (ii) injeta \textit{stubs} do navegador (canvas 2D, DOM,
+\texttt{localStorage}, WebAudio, \texttt{requestAnimationFrame}) e um \textbf{relógio
+simulado} (\texttt{Date.now()} controlado); (iii) executa cenários determinísticos (gerador
+pseudoaleatório com semente fixa) chamando \texttt{update()} quadro a quadro (16 ms
+simulados) e verificando asserções sobre o estado do jogo (posições, HP, projéteis, alvos).
+
+Cada teste foi executado \textbf{antes} da alteração (devendo falhar, comprovando que o
+comportamento não existia) e \textbf{depois} (devendo passar). A suíte completa
+(12 cenários) foi reexecutada como regressão após cada uma das 12 melhorias, e cada melhoria
+foi registrada em um \textit{commit} próprio.
+
+\section{Melhorias implementadas}
+
+\subsection{Modo Chefão --- Bot Chefão}
+
+\begin{enumerate}
+  \item \textbf{Navegação em espaços estreitos:} o chefão (raio 40 px $\approx$ corpo
+        $2\times2$ tiles) colidia e ficava preso em passagens de 1 tile. Foram criadas três
+        funções de \textit{steering}:
+\begin{lstlisting}
+caminhoLivre(x1, y1, x2, y2, raio)   // segmento livre p/ um corpo circular
+direcaoDesviada(ent, ang, distSonda) // "whiskers": 0, +-30, +-60, +-90, +-120 graus
+moverComDesvio(ent, ang, vel)        // move na 1a direcao livre p/ o raio
+\end{lstlisting}
+        Todos os deslocamentos do chefão (4 estados de ataque + patrulha) passaram a usar
+        \texttt{moverComDesvio}; a mira continua no alvo, só o deslocamento desvia.
+  \item \textbf{Cura passiva:} recupera $\max(1, \mathrm{round}(0{,}01 \times HP_{max}))$ por
+        segundo, limitada ao HP máximo, continuamente durante o combate.
+  \item \textbf{Fuga para se curar:} com $HP < HP_{max} \times 0{,}10 \times \min(5, d)$ e
+        adversário visível, move-se na direção oposta ao alvo ($1{,}3\times$ a velocidade) e
+        não executa nenhum estado de ataque; combinada à cura passiva, ele se recupera e
+        retorna ao combate ao cruzar o limiar.
+  \item \textbf{Foco no adversário com menor vida:} varre os adversários vivos num raio de
+        $2 \times d$ tiles e substitui o alvo padrão (mais próximo) pelo de menor HP.
+\end{enumerate}
+
+\subsection{Modo Chefão --- Bots da Equipe e Modo Dupla}
+
+Os bots da equipe do jogador (3 aliados no modo chefão; 1 parceiro no modo duplas)
+compartilham a mesma lógica:
+
+\begin{enumerate}
+  \item \textbf{Foco no chefão:} no modo chefão, o alvo é sempre o chefão, \textbf{mesmo sem
+        linha de visão} (antes, alvos atrás de parede eram descartados e o bot patrulhava
+        aleatoriamente). No modo duplas não existe chefão, e o parceiro mantém a seleção
+        padrão de alvos (decisão documentada).
+  \item \textbf{Acompanhar o jogador humano:} a mais de 300 px do jogador vivo, o destino de
+        movimento passa a ser a posição do jogador (prioridade menor que fugir da zona
+        tóxica e que coletar caixa próxima); o tiro no alvo continua independente.
+  \item \textbf{Fuga para se curar + busca por item de cura:} com
+        $HP < HP_{max} \times 0{,}10 \times \min(5, d)$: se existe caixa de vida no mapa,
+        ela vira o destino (o bot ``localiza e coleta o item de cura''); se não existe (caso
+        típico do modo chefão, sem caixas), o bot \textbf{recua} enquanto estiver a menos de
+        350 px do alvo e \textbf{continua atirando de longe} (alcance de tiro: 400 px).
+\end{enumerate}
+
+Suporte adicional: os deslocamentos ``diretos'' de todos os bots comuns passaram a usar
+\texttt{moverComDesvio}, permitindo contornar paredes ao buscar chefão/jogador/itens; e foi
+corrigido um defeito pré-existente no teto de cura da caixa de vida
+($\min(100, hp+50)$ podia \textbf{reduzir} o HP de aliados com máximo de 150).
+
+\subsection{Modo 1v9 --- Bots Inimigos}
+
+\begin{enumerate}
+  \item \textbf{Percepção escalada pela dificuldade:} o alvo é descartado além de
+        $(4 + 2d)$ tiles; dentro da visão, mantém-se o foco no adversário mais próximo.
+  \item \textbf{Fuga e busca por cura com pouca vida} ($HP < 40\%$): com caixa de vida no
+        mapa, abandona o combate e vai coletá-la (qualquer distância); sem caixa, recua do
+        adversário.
+  \item \textbf{Esconder-se abaixo de 30\% de vida:} para de atacar (tiro suprimido) e move-se
+        para um esconderijo calculado por \texttt{pontoEsconderijo(ent, ameaca)}: para cada
+        parede, projeta um ponto no lado oposto à ameaça e escolhe o ponto mais próximo que
+        \textbf{quebra a linha de visão}.
+  \item \textbf{Ataque corpo a corpo (faca):} com o alvo a menos de $55 + raio$ px, golpe de
+        faca (recarga 800 ms, dano 30, arco frontal de $\pm 72^{\circ}$, alcance
+        $70 + raio$) em vez de atirar; o tiro fica bloqueado no alcance da faca. Uma
+        varredura de limpeza remove bots mortos por faca ao fim do laço de IA.
+  \item \textbf{Esquiva ao identificar um tiro próximo:} com a recarga disponível
+        ($\max(10, 35-5d)$ s), varre projéteis inimigos num raio de 140 px; decompõe o vetor
+        bala$\to$bot na direção do projétil (aproximação) e na perpendicular (rota de
+        colisão, $|s| < raio + 12$). Ao detectar, impulso lateral de 250 ms a
+        $\max(3 \times vel,\; 3{,}5)$ px/quadro para o lado que aumenta a distância da
+        trajetória.
+  \item \textbf{Prioridade em coletar itens de ataque:} se o bot ainda não tem a melhoria de
+        dano, a caixa de \textbf{arma} visível no raio de coleta substitui a caixa mais
+        próxima de outro tipo; a busca de cura com HP baixo mantém prioridade maior
+        (sobrevivência).
+\end{enumerate}
+
+As camadas de decisão resultantes, por prioridade:
+\begin{center}
+  esquiva $>$ zona tóxica $>$ esconderijo $>$ cura $>$ coleta $>$ escolta $>$ combate.
+\end{center}
+
+\newpage
+
+\section{Resultados das validações (antes $\times$ depois)}
+
+\subsection*{Modo Chefão --- Bot Chefão}
+
+Cenário: navegação em passagem estreita (vão de 60 px, contorno possível)
+\begin{itemize}
+  \item Antes: preso do lado errado; distância final ao alvo: 463 px (FALHA)
+  \item Depois: contorna a barreira; distância final ao alvo: 125 px (PASSA)
+\end{itemize}
+
+\vspace{0.3cm}
+Cenário: cura passiva (chefão isolado com 50\% do HP, $HP_{max} = 1100$)
+\begin{itemize}
+  \item Antes: HP recuperado em $\approx$5 s: 0 (FALHA)
+  \item Depois: HP recuperado em $\approx$5 s: 44 ($\approx$1\%/s; teto respeitado) (PASSA)
+\end{itemize}
+
+\vspace{0.3cm}
+Cenário: fuga com 5\% do HP, adversário a 250 px
+\begin{itemize}
+  \item Antes: aproximou (250 $\to$ 174 px) e disparou 6 ataques em 2 s (FALHA)
+  \item Depois: afastou (250 $\to$ 539 px), 0 ataques na fuga; recuperou o HP e voltou a
+        atacar (24 ataques) (PASSA)
+\end{itemize}
+
+\vspace{0.3cm}
+Cenário: dois adversários na visão (perto com 150 HP; longe com 40 HP)
+\begin{itemize}
+  \item Antes: mirava no mais próximo (ângulo $0{,}00$) (FALHA)
+  \item Depois: mira no mais fraco (ângulo $-\pi/2$); alvo fraco fora da visão não é
+        priorizado (PASSA)
+\end{itemize}
+
+\subsection*{Modo Chefão --- Bots da Equipe e Modo Dupla}
+
+Cenário: aliado a 1000 px do jogador (escolta)
+\begin{itemize}
+  \item Antes: terminava a 1312 px (FALHA) \quad Depois: aproxima para 298 px (PASSA)
+\end{itemize}
+
+\vspace{0.3cm}
+Cenário: aliado sem linha de visão para o chefão (parede curta)
+\begin{itemize}
+  \item Antes: 1\textsuperscript{o} tiro no chefão só no quadro 314, via patrulha aleatória
+        (FALHA)
+  \item Depois: contorna a parede e atira no quadro 67; 6 tiros sustentados (PASSA)
+\end{itemize}
+
+\vspace{0.3cm}
+Cenário: parceiro do modo duplas a 800 px do jogador
+\begin{itemize}
+  \item Antes: terminava a 1224 px (FALHA) \quad Depois: aproxima para 303 px (PASSA)
+\end{itemize}
+
+\vspace{0.3cm}
+Cenário: aliado ferido (10/150 HP) a 250 px do chefão, sem itens no mapa
+\begin{itemize}
+  \item Antes: orbitava a 215 px (FALHA)
+  \item Depois: recua para 333 px e mantém 2+ tiros de longe (PASSA)
+\end{itemize}
+
+\vspace{0.3cm}
+Cenário: parceiro ferido (20/100 HP), caixa de vida a $\approx$900 px
+\begin{itemize}
+  \item Antes: ia lutar e morria sem coletar (FALHA)
+  \item Depois: coleta no quadro 246 e sobe para 70 HP (PASSA)
+\end{itemize}
+
+\subsection*{Modo 1v9 --- Bots Inimigos}
+
+Cenário: percepção (dificuldade 1, visão 300 px), adversário parado com visão limpa
+\begin{itemize}
+  \item Antes: atirava em alvo a 380 px (2 tiros) (FALHA)
+  \item Depois: 0 tiros a 380 px; a 200 px ataca normalmente; entre dois adversários na
+        visão, mira no mais próximo (PASSA)
+\end{itemize}
+
+\vspace{0.3cm}
+Cenário: fuga com 35/100 HP, adversário a 250 px, sem itens
+\begin{itemize}
+  \item Antes: orbitava a $\approx$249 px (FALHA) \quad Depois: abre para 395 px (PASSA)
+\end{itemize}
+
+\vspace{0.3cm}
+Cenário: 35/100 HP, item de vida a 450 px na direção oposta ao adversário
+\begin{itemize}
+  \item Antes: nunca coletava, preso no combate (FALHA)
+  \item Depois: abandona o combate, coleta no quadro 374 e sobe para 85 HP (PASSA)
+\end{itemize}
+
+\vspace{0.3cm}
+Cenário: esconderijo com 25/100 HP, adversário a 200 px (paredes originais do mapa)
+\begin{itemize}
+  \item Antes: 6 tiros em 600 quadros e terminava exposto (FALHA)
+  \item Depois: 0 tiros e termina atrás de parede, com linha de visão quebrada (PASSA)
+\end{itemize}
+
+\vspace{0.3cm}
+Cenário: faca --- adversário colado (40 px, perseguindo)
+\begin{itemize}
+  \item Antes: 0 golpes, seguia com a arma de fogo (FALHA)
+  \item Depois: 9 golpes de faca, 0 tiros, 90 de dano; bot com 5 HP morre pela faca e é
+        removido; a 200 px volta a atirar (PASSA)
+\end{itemize}
+
+\vspace{0.3cm}
+Cenário: esquiva --- projétil frontal a 120 px (bot parado e isolado)
+\begin{itemize}
+  \item Antes: acertava (HP 100 $\to$ 90; deslocamento 0) (FALHA)
+  \item Depois: desloca 56 px lateralmente sem dano; 2\textsuperscript{o} projétil na recarga
+        acerta; após $\approx$31 s esquiva novamente (PASSA)
+\end{itemize}
+
+\vspace{0.3cm}
+Cenário: prioridade de itens --- vida a 100 px e arma a 250 px
+\begin{itemize}
+  \item Antes: coletava primeiro a vida (mais próxima) (FALHA)
+  \item Depois: coleta primeiro a arma; dano sobe de 10 para 20 (PASSA)
+\end{itemize}
+
+\section{Discussão}
+
+\textbf{Steering guloso vs.\ planejamento global.} A navegação por ``apalpadores''
+(\texttt{direcaoDesviada}) é local e gulosa: não constrói um plano global de caminho e, em
+geometrias côncavas, pode oscilar. O mecanismo de anti-travamento original do jogo
+(teleporte do ponto de patrulha após $\approx$20 quadros preso) foi mantido como rede de
+segurança. Em contrapartida, o custo por quadro é baixíssimo e a solução respeita a
+arquitetura reativa original (um único laço \texttt{update()} sem estado de plano), o que
+foi decisivo para integrar as melhorias sem reescrever o jogo.
+
+\textbf{Interação entre comportamentos.} As melhorias foram integradas como camadas de
+prioridade (esquiva $>$ zona tóxica $>$ esconderijo $>$ cura $>$ coleta $>$ escolta $>$
+combate). Durante a validação, dois testes anteriores passaram a falhar após a introdução da
+esquiva --- não por regressão, mas porque a esquiva nova era corretamente disparada por
+projéteis residuais dos próprios cenários de teste; os cenários foram ajustados (limpeza de
+projéteis e contenção do tiro do bot vizinho no quadro da sondagem), ilustrando como
+comportamentos reativos compostos interagem de formas não óbvias.
+
+\textbf{Limiares onde a proposta é omissa.} O limiar de fuga/cura do 1v9 (40\%) foi definido
+acima do limiar de esconderijo (30\%) para criar dois estágios distintos de defesa; a visão
+do 1v9 ($(4+2d)$ tiles) e o clamp do fator de dificuldade em 5 para limiares percentuais
+foram calibrados para manter o jogo jogável em todas as dificuldades.
+
+\textbf{Correção de defeito pré-existente.} O teto de cura da caixa de vida
+($\min(100, hp+50)$) podia reduzir o HP de bots com máximo acima de 100 (aliados do modo
+chefão, com 150); foi corrigido para $\min(HP_{max}, hp+50)$.
+
+\section{Conclusão}
+
+Todos os comportamentos da proposta foram implementados de forma incremental (um
+\textit{commit} por melhoria, 12 no total), cada um validado por um cenário determinístico
+executado antes (falha) e depois (sucesso) da alteração, com regressão da suíte completa de
+12 cenários a cada passo --- todos aprovados ao final. O jogo permanece fiel à versão base de
+Tiago Linhares Medeiros, com bots significativamente mais competentes: o chefão navega,
+recua e prioriza alvos frágeis; os aliados escoltam o jogador e administram a própria vida; e
+os inimigos do 1v9 percebem, fogem, se escondem, esquivam, lutam corpo a corpo e priorizam
+itens de ataque, tudo escalando com a dificuldade da partida.
+
+\appendix
+
+\end{document}
