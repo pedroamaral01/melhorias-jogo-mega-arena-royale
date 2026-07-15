@@ -1019,7 +1019,7 @@
                 if (!bot.isBoss && modoJogo !== 'boss') { let dBC = Math.hypot(bot.x - 750, bot.y - 750); if (dBC > safeZone.radius && now - (bot.lastToxicDamage || 0) > 1000) { darDano(bot, 10, bot.x, bot.y, false, "gas"); bot.lastToxicDamage = now; if (bot.hp <= 0) { bots.splice(i, 1); atualizarUI(); continue; } } }
                 let isIgnoring = now < (bot.ignoreTargetUntil || 0); let alvoM = null; let menorD = Infinity; 
                 if (!isIgnoring) { if (player.hp > 0 && player.teamId !== bot.teamId) { let d = Math.hypot(player.x - bot.x, player.y - bot.y); if (d < menorD) { menorD = d; alvoM = player; } } bots.forEach(o => { if (o.teamId !== bot.teamId) { let d = Math.hypot(o.x - bot.x, o.y - bot.y); if (d < menorD) { menorD = d; alvoM = o; } } }); }
-                let visaoLimpa = alvoM ? !temParede(bot.x, bot.y, alvoM.x, alvoM.y) : false; if (alvoM && !visaoLimpa) alvoM = null; 
+                let visaoLimpa = alvoM ? !temParede(bot.x, bot.y, alvoM.x, alvoM.y) : false; if (alvoM && !visaoLimpa) alvoM = null; if (modoJogo === 'solo' && !bot.isBoss && alvoM && menorD > TILE * (4 + 2 * dificuldade)) alvoM = null;
                 if (bot.isBoss) {
                     if (!bot.lastPassiveHeal) bot.lastPassiveHeal = now;
                     if (now - bot.lastPassiveHeal >= 1000) { bot.lastPassiveHeal = now; if (bot.hp < bot.maxHp) { bot.hp = Math.min(bot.maxHp, bot.hp + Math.max(1, Math.round(bot.maxHp * 0.01))); atualizarUI(); } }
